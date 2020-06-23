@@ -1,0 +1,54 @@
+--- unifi_sh_api	2019-11-15 16:42:04.000000000 -0500
++++ unifiOS_sh_api	2020-06-23 15:52:28.522302284 -0400
+@@ -9,6 +9,7 @@
+ cookie=$(mktemp)
+ 
+ curl_cmd="curl --tlsv1 --silent --cookie ${cookie} --cookie-jar ${cookie} --insecure "
++curl_cmd_a=(curl --tlsv1 --silent --cookie ${cookie} --cookie-jar ${cookie} --insecure -H 'Content-Type: application/json' )
+ 
+ named_args_to_payload() {
+     payload=""
+@@ -37,9 +38,29 @@
+ 
+ unifi_login() {
+     # authenticate against unifi controller
+-    ${curl_cmd} --data "{\"username\":\"$username\", \"password\":\"$password\"}" $baseurl/api/login
++    csrftok=""
++    "${curl_cmd_a[@]}" --data "{\"username\":\"$username\", \"password\":\"$password\"}" $baseurl/api/auth/login
++    if grep -q TOKEN $cookie ; then
++        csrftok=$(get_csrf)
++    fi
+ }
+ 
++get_csrf() {
++    # extract csrf token from JWT
++    jwt=$(cat ${cookie} | grep TOKEN | awk '{print $7'} | cut -f2 -d.)
++    # This needs to be padded
++    jlen=${#jwt}
++    n=$((jlen % 4))
++    if [[ 2 -eq n ]]; then
++        jwt="${jwt}=="
++    elif [[ 3 -eq n ]]; then
++        jwt="${jwt}="
++    fi
++    json=$(openssl enc -base64 -d -A <<< "$jwt")
++    echo $json | jq -r '.csrfToken'
++}
++    
++
+ unifi_logout() {
+     # logout
+     ${curl_cmd} $baseurl/logout
+@@ -56,7 +77,11 @@
+     [ "${uri:0:1}" != "/" ] && uri="/$uri"
+     json="$@"
+     [ "$json" = "" ] && json="{}"
+-    ${curl_cmd} --data "$json" $baseurl/api/s/$site$uri
++    if [ -z "${csrftok}" ]; then
++        ${curl_cmd} --data "$json" $baseurl/api/s/$site$uri
++    else
++        "${curl_cmd_a[@]}" --data "$json" -H "X-CSRF-token: $csrftok" $baseurl/proxy/network/api/s/$site$uri
++    fi
+ }
+ 
+ # cmd/stamgr
